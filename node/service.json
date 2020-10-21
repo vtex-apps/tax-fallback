@@ -6,8 +6,12 @@
   "maxReplicas": 4,
   "workers": 1,
   "routes": {
-    "status": {
-      "path": "/_v/status/:code",
+    "getFallbackTaxes": {
+      "path": "/_v/tax-fallback/:country/:provider/:postalCode",
+      "public": true
+    },
+    "downloadFallbackTaxes": {
+      "path": "/_v/tax-fallback/download-taxes/:country/:provider",
       "public": true
     }
   }
