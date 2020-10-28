@@ -16,7 +16,7 @@ function createBasicAuthHeader(account: string, licenseKey: string) {
 
 export default class Avalara extends ExternalClient {
   constructor(context: IOContext, options?: InstanceOptions) {
-    super('http://rest.avatax.com/api/v2/', context, options)
+    super('http://sandbox-rest.avatax.com/api/v2/', context, options)
   }
 
   public async downloadTaxRatesByZipCode(date: string): Promise<string> {
@@ -34,6 +34,7 @@ export default class Avalara extends ExternalClient {
     return this.http.get(`taxratesbyzipcode/download/${date}`, {
       headers: {
         Authorization: authorization,
+        'X-Vtex-Use-Https': true,
         'Content-Type': 'application/json;charset=UTF-8',
       },
       metric: 'downloadTaxRatesByZipCode',

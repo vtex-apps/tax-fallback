@@ -38,6 +38,13 @@
       }
     },
     {
+      "name": "outbound-access",
+      "attrs": {
+        "host": "sandbox-rest.avatax.com",
+        "path": "/api/v2/*"
+      }
+    },
+    {
       "name": "update-app-settings"
     },
     {

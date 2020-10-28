@@ -1,6 +1,8 @@
+/* eslint-disable no-await-in-loop */
 /* eslint-disable no-console */
 import { Apps, NotFoundError, UserInputError } from '@vtex/api'
 import parse from 'csv-parse/lib/sync'
+import asyncPool from 'tiny-async-pool'
 
 import {
   FALLBACK_ENTITY_PREFIX,
@@ -8,6 +10,8 @@ import {
   AVALARA_FIELDS,
   AVALARA_SCHEMA,
   SCHEMA_VERSION,
+  MS_PER_DAY,
+  DAYS_TO_TRIGGER_DOWNLOAD,
 } from '../constants'
 
 const getAppId = (): string => {
@@ -134,12 +138,18 @@ export async function getFallbackByPostalCode(
   } catch (e) {
     console.log(`Failed to find taxes for ${postalCode}`)
     console.log(e)
+    throw new NotFoundError(`Failed to find taxes for ${postalCode}`)
   }
 
   const [data] = result
 
-  // eslint-disable-next-line no-console
-  console.log(data)
+  if (data.date) {
+    const taxDate = new Date(data.date).valueOf()
+    const diff = Date.now() - taxDate
+
+    if (diff / MS_PER_DAY > DAYS_TO_TRIGGER_DOWNLOAD)
+      downloadFallbackTableAvalara(ctx)
+  }
 
   ctx.status = 200
   ctx.body = data
@@ -148,14 +158,86 @@ export async function getFallbackByPostalCode(
   await next()
 }
 
+async function downloadFallbackTableAvalara(ctx: Context) {
+  const {
+    clients: { masterdata, avalara },
+  } = ctx
+
+  const date = new Date()
+  const formattedDate = date.toISOString().slice(0, 10)
+
+  await avalara
+    .downloadTaxRatesByZipCode(formattedDate)
+    .catch(e => {
+      console.log(e)
+      throw new NotFoundError('Failed to download new fallback table')
+    })
+    .then(response => {
+      if (!response)
+        throw new NotFoundError('Failed to download new fallback table')
+
+      return parse(response, {
+        columns: true,
+      })
+    })
+    .then(async (parsed: any[]) => {
+      await asyncPool(10, parsed, async row => {
+        let existingDocument = null
+
+        try {
+          ;[existingDocument] = (await masterdata.searchDocuments({
+            dataEntity: `${FALLBACK_ENTITY_PREFIX}avalara`,
+            fields: AVALARA_FIELDS,
+            schema: SCHEMA_VERSION,
+            where: `ZIP_CODE=${row.ZIP_CODE}`,
+            pagination: { page: 1, pageSize: 10 },
+          })) as any
+        } catch (e) {
+          console.log(`Could not find existing record for ${row.ZIP_CODE}`)
+        }
+
+        if (existingDocument?.date !== formattedDate) {
+          try {
+            await masterdata.createOrUpdateEntireDocument({
+              dataEntity: `${FALLBACK_ENTITY_PREFIX}avalara`,
+              fields: {
+                date: formattedDate,
+                TAX_SHIPPING_ALONE: row.TAX_SHIPPING_ALONE === 'Y',
+                TAX_SHIPPING_AND_HANDLING_TOGETHER:
+                  row.TAX_SHIPPING_AND_HANDLING_TOGETHER === 'Y',
+                ZIP_CODE: row.ZIP_CODE,
+                STATE_ABBREV: row.STATE_ABBREV,
+                COUNTY_NAME: row.COUNTY_NAME,
+                CITY_NAME: row.CITY_NAME,
+                STATE_SALES_TAX: parseFloat(row.STATE_SALES_TAX),
+                STATE_USE_TAX: parseFloat(row.STATE_USE_TAX),
+                COUNTY_SALES_TAX: parseFloat(row.COUNTY_SALES_TAX),
+                COUNTY_USE_TAX: parseFloat(row.COUNTY_USE_TAX),
+                CITY_SALES_TAX: parseFloat(row.CITY_SALES_TAX),
+                CITY_USE_TAX: parseFloat(row.CITY_USE_TAX),
+                TOTAL_SALES_TAX: parseFloat(row.TOTAL_SALES_TAX),
+                TOTAL_USE_TAX: parseFloat(row.TOTAL_USE_TAX),
+              },
+              schema: SCHEMA_VERSION,
+              id: existingDocument?.id,
+            })
+            console.log(`Updated ${row.ZIP_CODE}`)
+          } catch (e) {
+            console.log(`Failed to update postal code ${row.ZIP_CODE}`)
+            console.log(e)
+          }
+        } else {
+          console.log(`${row.ZIP_CODE} already exists`)
+        }
+      })
+    })
+}
+
 export async function downloadFallbackTable(
   ctx: Context,
   next: () => Promise<any>
 ) {
-  const {
-    headers,
-    clients: { masterdata, avalara },
-  } = ctx
+  const { headers } = ctx
 
   const { provider } = ctx.vtex.route.params
 
@@ -167,68 +249,14 @@ export async function downloadFallbackTable(
     throw new UserInputError('Invalid provider provided')
   }
 
-  const updatedPostalCodes: string[] = []
-  const failedPostalCodes: string[] = []
-
   await setupFallbackSchema(ctx)
 
   if (provider === 'avalara') {
-    const date = new Date()
-    const formattedDate = date.toISOString().slice(0, 10)
-
-    console.log('start avalara')
-
-    await avalara
-      .downloadTaxRatesByZipCode(formattedDate)
-      .catch(e => {
-        console.log(e)
-        throw new NotFoundError('Failed to download new fallback table')
-      })
-      .then(response => {
-        if (!response)
-          throw new NotFoundError('Failed to download new fallback table')
-
-        return parse(response, {
-          columns: true,
-        })
-      })
-      .then(async (parsed: any[]) => {
-        await Promise.all(
-          parsed.map(async row => {
-            const [existingDocument] = (await masterdata.searchDocuments({
-              dataEntity: `${FALLBACK_ENTITY_PREFIX}${provider}`,
-              fields: provider === 'avalara' ? AVALARA_FIELDS : [],
-              schema: SCHEMA_VERSION,
-              where: `ZIP_CODE=${row.ZIP_CODE}`,
-              pagination: { page: 1, pageSize: 10 },
-            })) as any
-
-            try {
-              await masterdata.createOrUpdateEntireDocument({
-                dataEntity: `${FALLBACK_ENTITY_PREFIX}${provider}`,
-                fields: {
-                  date: formattedDate,
-                  TAX_SHIPPING_ALONE: row.TAX_SHIPPING_ALONE === 'Y',
-                  TAX_SHIPPING_AND_HANDLING_TOGETHER:
-                    row.TAX_SHIPPING_AND_HANDLING_TOGETHER === 'Y',
-                  ...row,
-                },
-                schema: SCHEMA_VERSION,
-                id: existingDocument?.id,
-              })
-              updatedPostalCodes.push(row.ZIP_CODE)
-            } catch (e) {
-              failedPostalCodes.push(row.ZIP_CODE)
-              console.log(`Failed to update postal code ${row.ZIP_CODE}`)
-              console.log(e)
-            }
-          })
-        )
-      })
+    downloadFallbackTableAvalara(ctx)
   }
 
   ctx.status = 200
-  ctx.body = { updated: updatedPostalCodes, failed: failedPostalCodes }
+  ctx.body = { msg: 'Started download of new tax table' }
   ctx.set('Cache-Control', headers['cache-control'])
 
   await next()

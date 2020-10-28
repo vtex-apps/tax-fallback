@@ -1,5 +1,11 @@
 export const FALLBACK_ENTITY_PREFIX = 'taxFallback_'
 export const SUPPORTED_PROVIDERS = ['avalara']
+
+export const MS_PER_DAY = 1000 * 60 * 60 * 24
+export const DAYS_TO_TRIGGER_DOWNLOAD = 28
+
+export const SCHEMA_VERSION = 'v1.1'
+
 export const AVALARA_FIELDS = [
   'id',
   'date',
@@ -18,12 +24,15 @@ export const AVALARA_FIELDS = [
   'TAX_SHIPPING_ALONE',
   'TAX_SHIPPING_AND_HANDLING_TOGETHER',
 ]
-export const SCHEMA_VERSION = 'v1'
 export const AVALARA_SCHEMA = {
   properties: {
     date: {
       type: 'string',
       title: 'Date',
+    },
+    ZIP_CODE: {
+      type: 'string',
+      title: 'Zip Code',
     },
     STATE_ABBREV: {
       type: 'string',
