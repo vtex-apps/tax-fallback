@@ -6,7 +6,7 @@ New tax tables are downloaded every 4 weeks.
 
 To retrieve taxes for a given postal code, send a GET request to the following URL:
 
-### https://vtex.myvtex.com/_v/tax-fallback/{country}/{provider}/{postalCode}
+### https://sandboxusdev.myvtex.com/_v/tax-fallback/{country}/{provider}/{postalCode}
 
 | Param        |   Type   |            Description             |   Supported Values   |
 | ------------ | :------: | :--------------------------------: | :------------------: |
@@ -16,7 +16,7 @@ To retrieve taxes for a given postal code, send a GET request to the following U
 
 Example request:
 
-`GET https://vtex.myvtex.com/_v/tax-fallback/us/avalara/14617`
+`GET https://sandboxusdev.myvtex.com/_v/tax-fallback/us/avalara/14617`
 
 Example response:
 
