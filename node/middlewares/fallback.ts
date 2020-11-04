@@ -1,6 +1,11 @@
 /* eslint-disable no-await-in-loop */
 /* eslint-disable no-console */
-import { Apps, NotFoundError, UserInputError } from '@vtex/api'
+import {
+  Apps,
+  AuthenticationError,
+  NotFoundError,
+  UserInputError,
+} from '@vtex/api'
 import parse from 'csv-parse/lib/sync'
 import asyncPool from 'tiny-async-pool'
 
@@ -254,6 +259,9 @@ export async function downloadFallbackTable(
   next: () => Promise<any>
 ) {
   const { headers } = ctx
+  const apps = new Apps(ctx.vtex)
+  const app: string = getAppId()
+  const settings = await apps.getAppSettings(app)
 
   const { provider } = ctx.vtex.route.params
 
@@ -268,6 +276,10 @@ export async function downloadFallbackTable(
   await setupFallbackSchema(ctx)
 
   if (provider === 'avalara') {
+    if (!settings.avalaraLogin || !settings.avalaraPassword) {
+      throw new AuthenticationError('Avalara credentials not found')
+    }
+
     downloadFallbackTableAvalara(ctx)
   }
 
