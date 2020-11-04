@@ -1,6 +1,6 @@
 {
   "name": "tax-fallback",
-  "vendor": "vtex",
+  "vendor": "vtexus",
   "version": "0.0.2",
   "title": "Tax Fallback",
   "description": "API to get simple taxes when third party tax services aren't available",
