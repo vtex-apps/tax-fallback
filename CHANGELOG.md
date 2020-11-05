@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+
+- Use logger instead of console.log
+- Update docs
+
 ## [0.0.2] - 2020-10-28
 
 ### Changed

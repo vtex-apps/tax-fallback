@@ -1,6 +1,11 @@
 /* eslint-disable no-await-in-loop */
 /* eslint-disable no-console */
-import { Apps, NotFoundError, UserInputError } from '@vtex/api'
+import {
+  Apps,
+  AuthenticationError,
+  NotFoundError,
+  UserInputError,
+} from '@vtex/api'
 import parse from 'csv-parse/lib/sync'
 import asyncPool from 'tiny-async-pool'
 
@@ -102,6 +107,7 @@ export async function getFallbackByPostalCode(
   const {
     headers,
     clients: { masterdata },
+    vtex: { logger },
   } = ctx
 
   const { provider, postalCode } = ctx.vtex.route.params
@@ -126,7 +132,6 @@ export async function getFallbackByPostalCode(
 
   let result: any[] = []
 
-  // await setupFallbackSchema(ctx)
   try {
     result = await masterdata.searchDocuments({
       dataEntity: `${FALLBACK_ENTITY_PREFIX}${provider}`,
@@ -136,8 +141,10 @@ export async function getFallbackByPostalCode(
       pagination: { page: 1, pageSize: 10 },
     })
   } catch (e) {
-    console.log(`Failed to find taxes for ${postalCode}`)
-    console.log(e)
+    logger.error({
+      message: `Avalara: Failed to find taxes for ${postalCode}`,
+      error: e,
+    })
     throw new NotFoundError(`Failed to find taxes for ${postalCode}`)
   }
 
@@ -147,8 +154,12 @@ export async function getFallbackByPostalCode(
     const taxDate = new Date(data.date).valueOf()
     const diff = Date.now() - taxDate
 
-    if (diff / MS_PER_DAY > DAYS_TO_TRIGGER_DOWNLOAD)
+    if (diff / MS_PER_DAY > DAYS_TO_TRIGGER_DOWNLOAD) {
+      logger.info({
+        message: 'Avalara: download of new fallback table triggered',
+      })
       downloadFallbackTableAvalara(ctx)
+    }
   }
 
   ctx.status = 200
@@ -160,6 +171,7 @@ export async function getFallbackByPostalCode(
 
 async function downloadFallbackTableAvalara(ctx: Context) {
   const {
+    vtex: { logger },
     clients: { masterdata, avalara },
   } = ctx
 
@@ -169,12 +181,21 @@ async function downloadFallbackTableAvalara(ctx: Context) {
   await avalara
     .downloadTaxRatesByZipCode(formattedDate)
     .catch(e => {
-      console.log(e)
+      logger.error({
+        message: `Avalara: Failed to download new fallback table`,
+        error: e,
+      })
       throw new NotFoundError('Failed to download new fallback table')
     })
     .then(response => {
-      if (!response)
-        throw new NotFoundError('Failed to download new fallback table')
+      if (!response) {
+        logger.error({
+          message: `Avalara: Failed to download new fallback table (null response)`,
+        })
+        throw new NotFoundError(
+          'Failed to download new fallback table (null response)'
+        )
+      }
 
       return parse(response, {
         columns: true,
@@ -193,7 +214,7 @@ async function downloadFallbackTableAvalara(ctx: Context) {
             pagination: { page: 1, pageSize: 10 },
           })) as any
         } catch (e) {
-          console.log(`Could not find existing record for ${row.ZIP_CODE}`)
+          // console.log(`Could not find existing record for ${row.ZIP_CODE}`)
         }
 
         if (existingDocument?.date !== formattedDate) {
@@ -221,13 +242,13 @@ async function downloadFallbackTableAvalara(ctx: Context) {
               schema: SCHEMA_VERSION,
               id: existingDocument?.id,
             })
-            console.log(`Updated ${row.ZIP_CODE}`)
+            // console.log(`Updated ${row.ZIP_CODE}`)
           } catch (e) {
-            console.log(`Failed to update postal code ${row.ZIP_CODE}`)
-            console.log(e)
+            logger.error({
+              message: `Avalara: Failed to update postal code ${row.ZIP_CODE}`,
+              error: e,
+            })
           }
-        } else {
-          console.log(`${row.ZIP_CODE} already exists`)
         }
       })
     })
@@ -238,6 +259,9 @@ export async function downloadFallbackTable(
   next: () => Promise<any>
 ) {
   const { headers } = ctx
+  const apps = new Apps(ctx.vtex)
+  const app: string = getAppId()
+  const settings = await apps.getAppSettings(app)
 
   const { provider } = ctx.vtex.route.params
 
@@ -252,6 +276,10 @@ export async function downloadFallbackTable(
   await setupFallbackSchema(ctx)
 
   if (provider === 'avalara') {
+    if (!settings.avalaraLogin || !settings.avalaraPassword) {
+      throw new AuthenticationError('Avalara credentials not found')
+    }
+
     downloadFallbackTableAvalara(ctx)
   }
 

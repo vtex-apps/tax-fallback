@@ -1,14 +1,14 @@
 # Tax Fallback API
 
-This app provides tax tables that can be used for simple tax calculation when a dynamic tax calculation is not available.
+This app's API provides tax tables that can be used for simple tax calculation when a dynamic tax calculation is not available. New tax tables are downloaded every 4 weeks.
 
-New tax tables are downloaded every 4 weeks.
+You do not need to install this app in your account. It is installed in the `vtexus` account and other apps can send requests to its API there.
 
-To retrieve taxes for a given postal code, send a GET request to the following URL:
+To retrieve taxes for a given postal code, your app can send a GET request to the following URL:
 
-### https://sandboxusdev.myvtex.com/_v/tax-fallback/{country}/{provider}/{postalCode}
+### https://vtexus.myvtex.com/_v/tax-fallback/{country}/{provider}/{postalCode}
 
-| Param        |   Type   |            Description             |   Supported Values   |
+| URL Param    |   Type   |            Description             |   Supported Values   |
 | ------------ | :------: | :--------------------------------: | :------------------: |
 | `country`    | `string` |     Destination country (ISO2)     |         `us`         |
 | `provider`   | `string` |         Tax table provider         |      `avalara`       |
@@ -16,7 +16,7 @@ To retrieve taxes for a given postal code, send a GET request to the following U
 
 Example request:
 
-`GET https://sandboxusdev.myvtex.com/_v/tax-fallback/us/avalara/14617`
+`GET https://vtexus.myvtex.com/_v/tax-fallback/us/avalara/14617`
 
 Example response:
 
