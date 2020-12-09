@@ -150,13 +150,16 @@ export async function getFallbackByPostalCode(
 
   const [data] = result
 
-  if (data.date) {
+  if (!data) throw new NotFoundError(`No taxes found for ${postalCode}`)
+
+  if (data?.date) {
     const taxDate = new Date(data.date).valueOf()
     const diff = Date.now() - taxDate
 
     if (diff / MS_PER_DAY > DAYS_TO_TRIGGER_DOWNLOAD) {
       logger.info({
-        message: 'Avalara: download of new fallback table triggered',
+        message:
+          'Avalara: download of new fallback table triggered (expired date)',
       })
       downloadFallbackTableAvalara(ctx)
     }

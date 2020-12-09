@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- Respond with 404 if data does not exist for provided postal code
+
 ## [0.0.3] - 2020-11-05
 
 ### Changed
