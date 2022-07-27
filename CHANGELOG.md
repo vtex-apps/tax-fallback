@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - Quality engineering actions
 
+### Changed
+
+- Optimize `ttl` and `memory` values in `node/service.json`
+
 ## [0.0.4] - 2020-12-09
 
 ### Fixed
