@@ -16,6 +16,7 @@ To retrieve taxes for a given postal code, your app can send a GET request to th
 
 Example request:
 
+
 `GET https://vtexus.myvtex.com/_v/tax-fallback/us/avalara/14617`
 
 Example response:
