@@ -11,8 +11,8 @@
       "public": true
     },
     "downloadFallbackTaxes": {
-      "path": "/_v/tax-fallback/download-taxes/:country/:provider",
-      "public": true
+      "path": "/_v/download-taxes/:country/:provider",
+      "public": false
     }
   },
   "events": {
