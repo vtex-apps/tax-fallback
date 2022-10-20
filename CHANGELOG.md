@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+
+- Increase allocated memory
+- Use vbase instead of MasterData
+- Change download tax route to private
+
 ## [0.0.5] - 2022-07-27
 
 ### Added

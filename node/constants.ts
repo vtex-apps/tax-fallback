@@ -1,5 +1,8 @@
 export const FALLBACK_ENTITY_PREFIX = 'taxFallback_'
 export const SUPPORTED_PROVIDERS = ['avalara']
+export const TAX_UPDATE_EVENT = 'taxFallback.taxUpdate'
+export const VBASE_BUCKET = 'tax-fallback'
+export const AVALARA_LOCK_PATH = 'avalara-lock'
 
 export const MS_PER_DAY = 1000 * 60 * 60 * 24
 export const DAYS_TO_TRIGGER_DOWNLOAD = 28
