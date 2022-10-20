@@ -1,26 +1,49 @@
-/* eslint-disable no-await-in-loop */
 /* eslint-disable no-console */
 import {
   Apps,
   AuthenticationError,
   NotFoundError,
   UserInputError,
+  TooManyRequestsError,
 } from '@vtex/api'
 import parse from 'csv-parse/lib/sync'
-import asyncPool from 'tiny-async-pool'
 
 import {
+  TAX_UPDATE_EVENT,
+  VBASE_BUCKET,
   FALLBACK_ENTITY_PREFIX,
   SUPPORTED_PROVIDERS,
-  AVALARA_FIELDS,
   AVALARA_SCHEMA,
   SCHEMA_VERSION,
   MS_PER_DAY,
   DAYS_TO_TRIGGER_DOWNLOAD,
 } from '../constants'
 
+interface TaxEntry {
+  provider: string
+  date: string
+  TAX_SHIPPING_ALONE: boolean
+  TAX_SHIPPING_AND_HANDLING_TOGETHER: boolean
+  ZIP_CODE: string
+  STATE_ABBREV: string
+  COUNTY_NAME: string
+  CITY_NAME: string
+  STATE_SALES_TAX: number
+  STATE_USE_TAX: number
+  COUNTY_SALES_TAX: number
+  COUNTY_USE_TAX: number
+  CITY_SALES_TAX: number
+  CITY_USE_TAX: number
+  TOTAL_SALES_TAX: number
+  TOTAL_USE_TAX: number
+}
+
 const getAppId = (): string => {
   return process.env.VTEX_APP_ID ?? ''
+}
+
+function timeout(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 async function setupFallbackSchema(ctx: Context) {
@@ -75,7 +98,7 @@ async function setupFallbackSchema(ctx: Context) {
 
 export async function saveFallbackSchema(
   ctx: Context,
-  next: () => Promise<any>
+  next: () => Promise<void>
 ) {
   const { headers } = ctx
 
@@ -102,11 +125,11 @@ export async function saveFallbackSchema(
 
 export async function getFallbackByPostalCode(
   ctx: Context,
-  next: () => Promise<any>
+  next: () => Promise<void>
 ) {
   const {
     headers,
-    clients: { masterdata },
+    clients: { vbase },
     vtex: { logger },
   } = ctx
 
@@ -130,25 +153,9 @@ export async function getFallbackByPostalCode(
     )
   }
 
-  let result: any[] = []
+  const path = `${provider}-${postalCode}`
 
-  try {
-    result = await masterdata.searchDocuments({
-      dataEntity: `${FALLBACK_ENTITY_PREFIX}${provider}`,
-      fields: provider === 'avalara' ? AVALARA_FIELDS : [],
-      schema: SCHEMA_VERSION,
-      where: `ZIP_CODE=${postalCode}`,
-      pagination: { page: 1, pageSize: 10 },
-    })
-  } catch (e) {
-    logger.error({
-      message: `Avalara: Failed to find taxes for ${postalCode}`,
-      error: e,
-    })
-    throw new NotFoundError(`Failed to find taxes for ${postalCode}`)
-  }
-
-  const [data] = result
+  const data: TaxEntry = await vbase.getJSON(VBASE_BUCKET, path, true)
 
   if (!data) throw new NotFoundError(`No taxes found for ${postalCode}`)
 
@@ -161,7 +168,7 @@ export async function getFallbackByPostalCode(
         message:
           'Avalara: download of new fallback table triggered (expired date)',
       })
-      downloadFallbackTableAvalara(ctx)
+      downloadFallbackTableAvalara(ctx).catch(() => {})
     }
   }
 
@@ -175,7 +182,7 @@ export async function getFallbackByPostalCode(
 async function downloadFallbackTableAvalara(ctx: Context) {
   const {
     vtex: { logger },
-    clients: { masterdata, avalara },
+    clients: { events, avalara },
   } = ctx
 
   const date = new Date()
@@ -205,64 +212,42 @@ async function downloadFallbackTableAvalara(ctx: Context) {
       })
     })
     .then(async (parsed: any[]) => {
-      await asyncPool(10, parsed, async row => {
-        let existingDocument = null
-
-        try {
-          ;[existingDocument] = (await masterdata.searchDocuments({
-            dataEntity: `${FALLBACK_ENTITY_PREFIX}avalara`,
-            fields: AVALARA_FIELDS,
-            schema: SCHEMA_VERSION,
-            where: `ZIP_CODE=${row.ZIP_CODE}`,
-            pagination: { page: 1, pageSize: 10 },
-          })) as any
-        } catch (e) {
-          // console.log(`Could not find existing record for ${row.ZIP_CODE}`)
-        }
-
-        if (existingDocument?.date !== formattedDate) {
-          try {
-            await masterdata.createOrUpdateEntireDocument({
-              dataEntity: `${FALLBACK_ENTITY_PREFIX}avalara`,
-              fields: {
-                date: formattedDate,
-                TAX_SHIPPING_ALONE: row.TAX_SHIPPING_ALONE === 'Y',
-                TAX_SHIPPING_AND_HANDLING_TOGETHER:
-                  row.TAX_SHIPPING_AND_HANDLING_TOGETHER === 'Y',
-                ZIP_CODE: row.ZIP_CODE,
-                STATE_ABBREV: row.STATE_ABBREV,
-                COUNTY_NAME: row.COUNTY_NAME,
-                CITY_NAME: row.CITY_NAME,
-                STATE_SALES_TAX: parseFloat(row.STATE_SALES_TAX),
-                STATE_USE_TAX: parseFloat(row.STATE_USE_TAX),
-                COUNTY_SALES_TAX: parseFloat(row.COUNTY_SALES_TAX),
-                COUNTY_USE_TAX: parseFloat(row.COUNTY_USE_TAX),
-                CITY_SALES_TAX: parseFloat(row.CITY_SALES_TAX),
-                CITY_USE_TAX: parseFloat(row.CITY_USE_TAX),
-                TOTAL_SALES_TAX: parseFloat(row.TOTAL_SALES_TAX),
-                TOTAL_USE_TAX: parseFloat(row.TOTAL_USE_TAX),
-              },
-              schema: SCHEMA_VERSION,
-              id: existingDocument?.id,
-            })
-            // console.log(`Updated ${row.ZIP_CODE}`)
-          } catch (e) {
-            logger.error({
-              message: `Avalara: Failed to update postal code ${row.ZIP_CODE}`,
-              error: e,
-            })
-          }
-        }
-      })
+      for (const row of parsed) {
+        // eslint-disable-next-line no-await-in-loop
+        await timeout(50)
+        events.sendEvent('vtex.tax-fallback', TAX_UPDATE_EVENT, {
+          provider: 'avalara',
+          date: formattedDate,
+          TAX_SHIPPING_ALONE: row.TAX_SHIPPING_ALONE === 'Y',
+          TAX_SHIPPING_AND_HANDLING_TOGETHER:
+            row.TAX_SHIPPING_AND_HANDLING_TOGETHER === 'Y',
+          ZIP_CODE: row.ZIP_CODE,
+          STATE_ABBREV: row.STATE_ABBREV,
+          COUNTY_NAME: row.COUNTY_NAME,
+          CITY_NAME: row.CITY_NAME,
+          STATE_SALES_TAX: parseFloat(row.STATE_SALES_TAX),
+          STATE_USE_TAX: parseFloat(row.STATE_USE_TAX),
+          COUNTY_SALES_TAX: parseFloat(row.COUNTY_SALES_TAX),
+          COUNTY_USE_TAX: parseFloat(row.COUNTY_USE_TAX),
+          CITY_SALES_TAX: parseFloat(row.CITY_SALES_TAX),
+          CITY_USE_TAX: parseFloat(row.CITY_USE_TAX),
+          TOTAL_SALES_TAX: parseFloat(row.TOTAL_SALES_TAX),
+          TOTAL_USE_TAX: parseFloat(row.TOTAL_USE_TAX),
+        })
+      }
     })
 }
 
 export async function downloadFallbackTable(
   ctx: Context,
-  next: () => Promise<any>
+  next: () => Promise<void>
 ) {
-  const { headers } = ctx
-  const apps = new Apps(ctx.vtex)
+  const {
+    headers,
+    clients: { apps, vbase },
+  } = ctx
+
+  let alreadyUpdated = false
   const app: string = getAppId()
   const settings = await apps.getAppSettings(app)
 
@@ -276,19 +261,71 @@ export async function downloadFallbackTable(
     throw new UserInputError('Invalid provider provided')
   }
 
-  await setupFallbackSchema(ctx)
-
   if (provider === 'avalara') {
     if (!settings.avalaraLogin || !settings.avalaraPassword) {
       throw new AuthenticationError('Avalara credentials not found')
     }
 
-    downloadFallbackTableAvalara(ctx)
+    const date = new Date()
+    const formattedDate = date.toISOString().slice(0, 10)
+
+    const path = `avalara-98101` // this is the highest postal code in Avalara's table
+    const data: TaxEntry = await vbase.getJSON(VBASE_BUCKET, path, true)
+
+    if (data?.date === formattedDate) {
+      alreadyUpdated = true
+    } else {
+      downloadFallbackTableAvalara(ctx)
+    }
   }
 
   ctx.status = 200
-  ctx.body = { msg: 'Started download of new tax table' }
+  ctx.body = {
+    msg: alreadyUpdated
+      ? 'Taxes are already up to date'
+      : 'Tax update initiated',
+  }
   ctx.set('Cache-Control', headers['cache-control'])
+
+  await next()
+}
+
+export async function updateTax(ctx: EventCtx, next: () => Promise<void>) {
+  const {
+    body,
+    clients: { vbase },
+    vtex: { logger },
+  } = ctx
+
+  if (!body.provider || !body.date || !body.ZIP_CODE || !body.TOTAL_SALES_TAX) {
+    return next()
+  }
+
+  const path = `${body.provider}-${body.ZIP_CODE}`
+
+  const existingData: TaxEntry | null = await vbase.getJSON(
+    VBASE_BUCKET,
+    path,
+    true
+  )
+
+  if (existingData?.date) {
+    const oldDate = new Date(existingData.date).valueOf()
+    const newDate = new Date(body.date).valueOf()
+
+    if (oldDate >= newDate) {
+      return next()
+    }
+  }
+
+  await vbase.saveJSON(VBASE_BUCKET, path, body).catch(error => {
+    logger.warn({
+      message: 'updateTax-error',
+      error,
+    })
+
+    throw new TooManyRequestsError('Save to vbase request failed')
+  })
 
   await next()
 }

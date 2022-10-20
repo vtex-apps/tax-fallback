@@ -1,9 +1,9 @@
 {
-  "memory": 256,
+  "memory": 512,
   "ttl": 60,
-  "timeout": 10,
+  "timeout": 30,
   "minReplicas": 2,
-  "maxReplicas": 4,
+  "maxReplicas": 10,
   "workers": 1,
   "routes": {
     "getFallbackTaxes": {
@@ -13,6 +13,12 @@
     "downloadFallbackTaxes": {
       "path": "/_v/tax-fallback/download-taxes/:country/:provider",
       "public": true
+    }
+  },
+  "events": {
+    "taxUpdate": {
+      "sender": "vtex.tax-fallback",
+      "keys": ["taxFallback.taxUpdate"]
     }
   }
 }
