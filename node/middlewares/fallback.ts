@@ -11,6 +11,7 @@ import parse from 'csv-parse/lib/sync'
 import {
   TAX_UPDATE_EVENT,
   VBASE_BUCKET,
+  AVALARA_LOCK_PATH,
   FALLBACK_ENTITY_PREFIX,
   SUPPORTED_PROVIDERS,
   AVALARA_SCHEMA,
@@ -36,6 +37,10 @@ interface TaxEntry {
   CITY_USE_TAX: number
   TOTAL_SALES_TAX: number
   TOTAL_USE_TAX: number
+}
+
+interface TaxLock {
+  locked: boolean
 }
 
 const getAppId = (): string => {
@@ -182,8 +187,18 @@ export async function getFallbackByPostalCode(
 async function downloadFallbackTableAvalara(ctx: Context) {
   const {
     vtex: { logger },
-    clients: { events, avalara },
+    clients: { events, avalara, vbase },
   } = ctx
+
+  const checkLock: TaxLock = await vbase.getJSON(
+    VBASE_BUCKET,
+    AVALARA_LOCK_PATH,
+    true
+  )
+
+  if (checkLock?.locked) {
+    return
+  }
 
   const date = new Date()
   const formattedDate = date.toISOString().slice(0, 10)
@@ -197,7 +212,7 @@ async function downloadFallbackTableAvalara(ctx: Context) {
       })
       throw new NotFoundError('Failed to download new fallback table')
     })
-    .then(response => {
+    .then(async response => {
       if (!response) {
         logger.error({
           message: `Avalara: Failed to download new fallback table (null response)`,
@@ -206,6 +221,10 @@ async function downloadFallbackTableAvalara(ctx: Context) {
           'Failed to download new fallback table (null response)'
         )
       }
+
+      await vbase
+        .saveJSON(VBASE_BUCKET, AVALARA_LOCK_PATH, { locked: true })
+        .catch(() => {})
 
       return parse(response, {
         columns: true,
@@ -235,6 +254,10 @@ async function downloadFallbackTableAvalara(ctx: Context) {
           TOTAL_USE_TAX: parseFloat(row.TOTAL_USE_TAX),
         })
       }
+
+      await vbase
+        .saveJSON(VBASE_BUCKET, AVALARA_LOCK_PATH, { locked: false })
+        .catch(() => {})
     })
 }
 
@@ -247,7 +270,6 @@ export async function downloadFallbackTable(
     clients: { apps, vbase },
   } = ctx
 
-  let alreadyUpdated = false
   const app: string = getAppId()
   const settings = await apps.getAppSettings(app)
 
@@ -266,24 +288,44 @@ export async function downloadFallbackTable(
       throw new AuthenticationError('Avalara credentials not found')
     }
 
+    const checkLock: TaxLock = await vbase.getJSON(
+      VBASE_BUCKET,
+      AVALARA_LOCK_PATH,
+      true
+    )
+
+    if (checkLock?.locked) {
+      ctx.status = 200
+      ctx.body = {
+        msg: 'Update already in progress',
+      }
+      ctx.set('Cache-Control', headers['cache-control'])
+
+      return next()
+    }
+
     const date = new Date()
     const formattedDate = date.toISOString().slice(0, 10)
 
     const path = `avalara-98101` // this is the highest postal code in Avalara's table
-    const data: TaxEntry = await vbase.getJSON(VBASE_BUCKET, path, true)
+    const checkDate: TaxEntry = await vbase.getJSON(VBASE_BUCKET, path, true)
 
-    if (data?.date === formattedDate) {
-      alreadyUpdated = true
-    } else {
-      downloadFallbackTableAvalara(ctx)
+    if (checkDate?.date === formattedDate) {
+      ctx.status = 200
+      ctx.body = {
+        msg: 'Taxes are already up to date',
+      }
+      ctx.set('Cache-Control', headers['cache-control'])
+
+      return next()
     }
+
+    downloadFallbackTableAvalara(ctx)
   }
 
   ctx.status = 200
   ctx.body = {
-    msg: alreadyUpdated
-      ? 'Taxes are already up to date'
-      : 'Tax update initiated',
+    msg: 'Tax update initiated',
   }
   ctx.set('Cache-Control', headers['cache-control'])
 
